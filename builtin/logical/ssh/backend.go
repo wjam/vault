@@ -6,11 +6,13 @@ import (
 	"github.com/hashicorp/vault/helper/salt"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
+	"sync"
 )
 
 type backend struct {
 	*framework.Backend
 	salt *salt.Salt
+	revokeStorageLock sync.RWMutex
 }
 
 func Factory(conf *logical.BackendConfig) (logical.Backend, error) {
@@ -37,6 +39,8 @@ func Backend(conf *logical.BackendConfig) (*backend, error) {
 		PathsSpecial: &logical.Paths{
 			Unauthenticated: []string{
 				"verify",
+				"public_key",
+				"crl",
 			},
 		},
 
@@ -48,11 +52,18 @@ func Backend(conf *logical.BackendConfig) (*backend, error) {
 			pathCredsCreate(&b),
 			pathLookup(&b),
 			pathVerify(&b),
+			pathConfigCA(&b),
+			pathSign(&b),
+			pathFetchCrl(&b),
+			pathRevoke(&b),
+			pathFetchPublicKey(&b),
+			pathTidy(&b),
 		},
 
 		Secrets: []*framework.Secret{
 			secretDynamicKey(&b),
 			secretOTP(&b),
+			secretCerts(&b),
 		},
 	}
 	return &b, nil
@@ -62,8 +73,8 @@ const backendHelp = `
 The SSH backend generates credentials allowing clients to establish SSH
 connections to remote hosts.
 
-There are two variants of the backend, which generate different types of
-credentials: dynamic keys and One-Time Passwords (OTPs). The desired behavior
+There are three variants of the backend, which generate different types of
+credentials: dynamic keys, One-Time Passwords (OTPs) and certificate authority. The desired behavior
 is role-specific and chosen at role creation time with the 'key_type'
 parameter.
 
